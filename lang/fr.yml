@@ -1,0 +1,5 @@
+fr:
+  FacebookHandler:
+    php.SilverStripe\Security\MemberAuthenticator\FacebookHandlerINVALIDTOKEN: 'Impossible de valider le jeton'
+  SilverStripe\Security\MemberAuthenticator\MemberFacebookForm:
+    AUTHENTICATORNAME: 'Se connecter avec Facebook'

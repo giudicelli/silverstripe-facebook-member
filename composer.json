@@ -1,0 +1,17 @@
+{
+    "name": "giudicelli/silverstripe-facebook-member",
+    "type": "library",
+    "description": "Allows users to log into Silverstripe using their Facebook account",
+    "keywords": ["silvertripe","authentication","facebook"],
+    "homepage": "https://github.com/giudicelli/silverstripe-facebook-member",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Frédéric Giudicelli",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "facebook/graph-sdk": ">=5.7.0"
+    }
+}

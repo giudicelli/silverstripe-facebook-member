@@ -1,0 +1,15 @@
+---
+Name: facebook-member
+---
+SilverStripe\Security\Member:
+  extensions:
+    - SilverStripe\Security\MemberAuthenticator\FacebookMember
+
+SilverStripe\Core\Injector\Injector:
+  SilverStripe\Security\Security:
+    properties:
+      Authenticators:
+        facebookauthenticator: %$SilverStripe\Security\MemberAuthenticator\FacebookAuthenticator
+
+SilverStripe\Security\MemberAuthenticator\FacebookHandler:
+  graphApiVersion: 'v3.3'
