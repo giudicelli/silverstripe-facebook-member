@@ -10,6 +10,3 @@ SilverStripe\Core\Injector\Injector:
     properties:
       Authenticators:
         facebookauthenticator: %$SilverStripe\Security\MemberAuthenticator\FacebookAuthenticator
-
-SilverStripe\Security\MemberAuthenticator\FacebookHandler:
-  graphApiVersion: 'v3.3'

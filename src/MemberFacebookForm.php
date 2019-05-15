@@ -2,22 +2,21 @@
 
 namespace SilverStripe\Security\MemberAuthenticator;
 
+use SilverStripe\Core\Environment;
 use SilverStripe\Control\Director;
 use SilverStripe\Control\RequestHandler;
 use SilverStripe\Forms\CheckboxField;
 use SilverStripe\Forms\FieldList;
 use SilverStripe\Forms\FormAction;
 use SilverStripe\Forms\HiddenField;
-use SilverStripe\Forms\LiteralField;
-use SilverStripe\Forms\ConfirmedPasswordField;
-use SilverStripe\Forms\RequiredFields;
-use SilverStripe\Forms\TextField;
 use SilverStripe\ORM\ValidationResult;
 use SilverStripe\Security\LoginForm as BaseLoginForm;
 use SilverStripe\Security\Member;
 use SilverStripe\Security\RememberLoginHash;
 use SilverStripe\Security\Security;
 use SilverStripe\View\Requirements;
+use SilverStripe\Security\MemberAuthenticator\FacebookHandler;
+use SilverStripe\Core\Config\Config;
 
 /**
  * Log-in form for the "member" authentication method.
@@ -38,10 +37,6 @@ class MemberFacebookForm extends MemberLoginForm
      * @var array
      */
     private static $required_fields = [
-        'FirstName',
-        'Surname',
-        'Email',
-        'Password',
     ];
 
     /**
@@ -76,10 +71,73 @@ class MemberFacebookForm extends MemberLoginForm
                             $name, $fields, $actions,
                             $checkCurrentUser);
 
-        $customCSS = project() . '/css/member_register.css';
+        $customCSS = project() . '/css/member_facebook.css';
         if (Director::fileExists($customCSS)) {
             Requirements::css($customCSS);
         }
+        
+        $useFacebookJS = Config::inst()->get(FacebookHandler::class, 'useFacebookJS');
+        $loadFacebookJS = Config::inst()->get(FacebookHandler::class, 'loadFacebookJS');
+        
+        if($useFacebookJS) {
+            $initScript = '';
+            if($loadFacebookJS) {
+                $initScript = "
+FB.init({
+  appId      : '".Environment::getEnv('FACEBOOK_APP_ID')."',
+  cookie     : true,
+  xfbml      : false,
+  version    : '".Config::inst()->get(FacebookHandler::class, 'graphApiVersion')."'
+});
+";
+            }
+
+            Requirements::customScript("
+if(window.fbAsyncInit)
+    window.fbAsyncInit__ssFB = window.fbAsyncInit;
+else
+    window.fbAsyncInit__ssFB = null;
+
+window.fbAsyncInit = function() {
+    if(window.fbAsyncInit__ssFB)
+        window.fbAsyncInit__ssFB();
+".$initScript."
+
+    var form = document.getElementById('".$this->FormName()."');
+    var button = document.getElementById('".$this->FormName()."_action_doLogin');
+    if(!button || !form)
+        return;
+
+    button.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        FB.getLoginStatus(function(response) {
+            if (response.status === 'connected') {
+                form.submit();
+                return;
+            }
+            FB.login(function(response) {
+                if (response.status === 'connected') {
+                    form.submit();
+                    return;
+                }
+            }, {scope: 'public_profile,email'});
+        });
+    });
+};
+");
+            if($loadFacebookJS) {
+                Requirements::customScript("
+  (function(d, s, id) {
+    var js, fjs = d.getElementsByTagName(s)[0];
+    if (d.getElementById(id)) return;
+    js = d.createElement(s); js.id = id;
+    js.src = 'https://connect.facebook.net/en_US/sdk.js';
+    fjs.parentNode.insertBefore(js, fjs);
+  }(document, 'script', 'facebook-jssdk'));
+");
+            }
+        } 
     }
 
     /**

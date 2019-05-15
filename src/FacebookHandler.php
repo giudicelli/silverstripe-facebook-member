@@ -22,7 +22,9 @@ use SilverStripe\Core\Config\Config;
  */
 class FacebookHandler extends RequestHandler
 {
-    private static $graphApiVersion = null;
+    private static $graphApiVersion = 'v3.3';
+    private static $useFacebookJS = false;
+    private static $loadFacebookJS = false;
 
     /**
      * @var Authenticator
@@ -139,81 +141,16 @@ class FacebookHandler extends RequestHandler
             return $this->redirect($link);
         }
 
-        // Logged in
-        //var_dump($accessToken->getValue());
-        // The OAuth 2.0 client handler helps us manage access tokens
-        $oAuth2Client = $fb->getOAuth2Client();
-
-        // Get the access token metadata from /debug_token
-        $tokenMetadata = $oAuth2Client->debugToken($accessToken);
-
-        try {
-            // Validation (these will throw FacebookSDKException's when they fail)
-            $tokenMetadata->validateAppId(Environment::getEnv('FACEBOOK_APP_ID'));
-            // If you know the user ID this access token belongs to, you can validate it here
-            //$tokenMetadata->validateUserId('123');
-            $tokenMetadata->validateExpiration();
-        }
-        catch(\Exception $e) {
-            $form->sessionMessage($e->getMessage(), 'bad');
-            // Fail to register redirects back to form
-            return $this->redirect($link);
-        }
-
-
-        if(!$accessToken->isLongLived()) {
-            // Exchanges a short-lived access token for a long-lived one
-            try {
-                $accessToken = $oAuth2Client->getLongLivedAccessToken($accessToken);
-            }
-            catch(\Exception $e) {
-                $form->sessionMessage($e->getMessage(), 'bad');
-                // Fail to register redirects back to form
-                return $this->redirect($link);
-            }
-        }
-
-        try {
-            // Get the \Facebook\GraphNodes\GraphUser object for the current user.
-            $response = $fb->get('/me?fields=id,first_name,last_name,email', $accessToken);
-            $me = $response->getGraphUser();
-        }
-        catch(\Exception $e) {
-            $form->sessionMessage($e->getMessage(), 'bad');
-            // Fail to register redirects back to form
-            return $this->redirect($link);
-        }
-        
-        //print_r($me); die();
-        
-        // First search by Facebook ID
-        $member = Member::get()
-            ->filter(['FacebookId' => $me->getField('id')])
-            ->first();
-
+        $error = '';
+        $member = $this->importMember($fb, $accessToken, $error);
         if(!$member) {
-            // The by email
-            $member = Member::get()
-                ->filter(['Email' => $me->getField('email')])
-                ->first();
-            if(!$member) {
-                // Create the user
-                $member = Member::create();
-            }
+            $form->sessionMessage($error, 'bad');
+            return $this->redirect($link);
         }
-        // Force the information from Facebook
-        $member->Email = $me->getField('email');
-        $member->FirstName = $me->getField('first_name');
-        $member->Surname = $me->getField('last_name');
-        $member->FacebookId = $me->getField('id');
-        $member->FacebookToken = (string)$accessToken;
-        $member->FacebookTokenExpires = date('Y-m-d H:i:s', $tokenMetadata->getField('expires_at')->getTimestamp());
-        $member->write();
-        
+
         // Perform login
         $identityStore = Injector::inst()->get(IdentityStore::class);
         $identityStore->logIn($member, false, $request);
-        
         return $this->redirectAfterSuccessfulLogin();
     }
 
@@ -250,10 +187,106 @@ class FacebookHandler extends RequestHandler
             'default_graph_version' => Config::inst()->get(static::class, 'graphApiVersion')
         ]);
 
+        $useFacebookJS = Config::inst()->get(self::class, 'useFacebookJS');
+        if($useFacebookJS) {
+            // Using Facebook Javascript SDK
+            $helper = $fb->getJavaScriptHelper();
+            try {
+                $accessToken = $helper->getAccessToken();
+            }
+            catch(\Exception $e) {
+            }
+
+            if(isset($accessToken)) {
+                // We have an access token, try to import the user
+                $error = '';
+                $member = $this->importMember($fb, $accessToken, $error);
+                if($member) {
+                    // Perform login
+                    $identityStore = Injector::inst()->get(IdentityStore::class);
+                    $identityStore->logIn($member, false, $request);
+                    return $this->redirectAfterSuccessfulLogin();
+                }
+            }
+        }
+        
+        // Default method, or fallback on a failed Javascript login
         $helper = $fb->getRedirectLoginHelper();
         $permissions = ['email', 'public_profile'];
         $loginUrl = $helper->getLoginUrl(Director::absoluteURL($this->Link('confirm')), $permissions);
         return $this->redirect($loginUrl);
+    }
+    
+    protected function importMember($fb, $accessToken, &$error) {
+        // Logged in
+        //var_dump($accessToken->getValue());
+        // The OAuth 2.0 client handler helps us manage access tokens
+        $oAuth2Client = $fb->getOAuth2Client();
+
+        // Get the access token metadata from /debug_token
+        $tokenMetadata = $oAuth2Client->debugToken($accessToken);
+
+        try {
+            // Validation (these will throw FacebookSDKException's when they fail)
+            $tokenMetadata->validateAppId(Environment::getEnv('FACEBOOK_APP_ID'));
+            // If you know the user ID this access token belongs to, you can validate it here
+            //$tokenMetadata->validateUserId('123');
+            $tokenMetadata->validateExpiration();
+        }
+        catch(\Exception $e) {
+            $error = $e->getMessage();
+            return false;
+        }
+
+
+        if(!$accessToken->isLongLived()) {
+            // Exchanges a short-lived access token for a long-lived one
+            try {
+                $accessToken = $oAuth2Client->getLongLivedAccessToken($accessToken);
+            }
+            catch(\Exception $e) {
+                $error = $e->getMessage();
+                return false;
+            }
+        }
+
+        try {
+            // Get the \Facebook\GraphNodes\GraphUser object for the current user.
+            $response = $fb->get('/me?fields=id,first_name,last_name,email', $accessToken);
+            $me = $response->getGraphUser();
+        }
+        catch(\Exception $e) {
+            $error = $e->getMessage();
+            return false;
+        }
+        
+        //print_r($me); die();
+        
+        // First search by Facebook ID
+        $member = Member::get()
+            ->filter(['FacebookId' => $me->getField('id')])
+            ->first();
+
+        if(!$member) {
+            // The by email
+            $member = Member::get()
+                ->filter(['Email' => $me->getField('email')])
+                ->first();
+            if(!$member) {
+                // Create the user
+                $member = Member::create();
+            }
+        }
+        // Force the information from Facebook
+        $member->Email = $me->getField('email');
+        $member->FirstName = $me->getField('first_name');
+        $member->Surname = $me->getField('last_name');
+        $member->FacebookId = $me->getField('id');
+        $member->FacebookToken = (string)$accessToken;
+        $member->FacebookTokenExpires = date('Y-m-d H:i:s', $tokenMetadata->getField('expires_at')->getTimestamp());
+        $member->write();
+        
+        return $member;
     }
     
 
